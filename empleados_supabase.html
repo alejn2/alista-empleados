@@ -135,7 +135,7 @@ function badge(type){return '<span class="badge" style="background:'+(TX_COLOR[t
 function msg(){return st.msg?'<div class="ok" style="margin-bottom:12px">'+esc(st.msg)+'</div>':st.warn?'<div class="warn" style="margin-bottom:12px" data-a="clearWarn">'+esc(st.warn)+'</div>':'';}
 function flash(m){st.msg=m;render();setTimeout(function(){st.msg='';render();},2500);}
 function render(){
-  try{root.innerHTML=st.view==='detail'?detail():st.view==='groupSelect'?groupSelectView():st.view==='groupLiq'?groupLiqForm():list();setFocus();}
+  try{root.innerHTML=st.view==='detail'?detail():st.view==='groupSelect'?groupSelectView():st.view==='groupLiq'?groupLiqForm():st.view==='lastGroup'?lastGroupView():list();if(st.view==='list')root.insertAdjacentHTML('afterbegin','<button data-a="lastGroup" style="width:100%;margin-bottom:12px">Ver última liquidación grupal</button>');setFocus();}
   catch(e){root.innerHTML='<div class="card"><h3 style="color:var(--red);margin-bottom:8px">Error</h3><div class="muted">'+esc(e.message)+'</div><button data-a="resetView" style="margin-top:12px">Volver</button></div>';}
 }
 function setFocus(){const f=document.querySelector('[data-focus]');if(f)f.focus();}
@@ -189,6 +189,16 @@ function getGroupItems(){
   const emps=st.emp.filter(function(e){return st.groupSel[e.id];});
   return {periodo:periodo,items:emps.map(function(e){const bruto=n(($('gb_'+e.id)||{value:0}).value),bono=n(($('gbo_'+e.id)||{value:0}).value),bonoDesc=($('gbd_'+e.id)||{value:''}).value.trim(),desc=n(($('gd_'+e.id)||{value:0}).value),fin=n(($('gf_'+e.id)||{value:0}).value),deudaInicio=Math.max(0,debt(e.id)),cobra=Math.max(0,bruto+bono-desc),resta=Math.max(0,deudaInicio-desc);return {e:e,bruto:bruto,bono:bono,bonoDesc:bonoDesc,desc:desc,fin:fin,deudaInicio:deudaInicio,cobra:cobra,resta:resta};})};
 }
+function lastGroupView(){
+  const batches={};
+  st.liq.forEach(function(l){const key=String(l.date);if(!batches[key])batches[key]=[];batches[key].push(l);});
+  const dates=Object.keys(batches).filter(function(k){return batches[k].length>1;}).map(Number).sort(function(a,b){return b-a;});
+  if(!dates.length)return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><button data-a="backToList" style="font-size:20px;padding:3px 10px;line-height:1">&#x2190;</button><div style="font-weight:600;font-size:17px">Última liquidación grupal</div></div><div class="card muted">Todavía no hay una liquidación grupal guardada.</div>';
+  const items=batches[String(dates[0])].map(function(l){const e=st.emp.find(function(x){return x.id===l.employeeId;})||{name:'Empleado no encontrado'};const total=n(l.sueldoBruto)+n(l.bonoExtra),cobra=Math.max(0,total-n(l.descuentoDeuda)),resta=Math.max(0,n(l.deudaAlInicio)-n(l.descuentoDeuda));return {l:l,e:e,total:total,cobra:cobra,resta:resta};});
+  const totals=items.reduce(function(s,x){s.total+=x.total;s.desc+=n(x.l.descuentoDeuda);s.cobra+=x.cobra;s.resta+=x.resta;return s;},{total:0,desc:0,cobra:0,resta:0});
+  const rows=items.map(function(x){return '<div class="card" style="margin-bottom:7px"><div style="font-weight:500">'+esc(x.e.name)+'</div><div class="row"><span>Total</span><strong>'+money(x.total)+'</strong></div><div class="row" style="color:var(--red)"><span>Descuento deuda</span><strong>- '+money(x.l.descuentoDeuda)+'</strong></div><div class="row"><span>Cobra en mano</span><strong>'+money(x.cobra)+'</strong></div><div class="row"><span>Deuda restante</span><strong style="color:'+(x.resta>0?'var(--red)':'var(--green)')+'">'+money(x.resta)+'</strong></div></div>';}).join('');
+  return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><button data-a="backToList" style="font-size:20px;padding:3px 10px;line-height:1">&#x2190;</button><div><div style="font-weight:600;font-size:17px">Última liquidación grupal</div><div class="muted">'+esc(items[0].l.periodo)+' · '+dateTime(dates[0])+'</div></div></div><div class="surf" style="margin-bottom:12px"><div class="g2"><div><div class="lbl">Total remuneraciones</div><strong>'+money(totals.total)+'</strong></div><div><div class="lbl">Descuentos</div><strong style="color:var(--red)">- '+money(totals.desc)+'</strong></div><div><div class="lbl">Efectivo a preparar</div><strong style="color:var(--navy)">'+money(totals.cobra)+'</strong></div><div><div class="lbl">Deuda restante</div><strong>'+money(totals.resta)+'</strong></div></div></div>'+rows;
+}
 document.addEventListener('click',function(ev){
   const el=ev.target.closest('[data-a]');if(!el)return;
   const a=el.dataset.a,id=el.dataset.id,e=emp();
@@ -216,6 +226,8 @@ document.addEventListener('click',function(ev){
   if(a==='delConfirm'&&e){const eid=e.id;st.emp=st.emp.filter(function(x){return x.id!==eid;});st.tx=st.tx.filter(function(x){return x.employeeId!==eid;});st.plans=st.plans.filter(function(x){return x.employeeId!==eid;});st.liq=st.liq.filter(function(x){return x.employeeId!==eid;});st.view='list';st.sel=null;deleteEmpFromSB(eid);saveToSB();flash('Empleado eliminado.');render();}
   if(a==='export'){const d={version:'alista-empleados-supabase',createdAt:new Date().toISOString(),employees:st.emp,transactions:st.tx,plans:st.plans,liquidaciones:st.liq};const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const lk=document.createElement('a');lk.href=URL.createObjectURL(b);lk.download='backup_alista_empleados.json';lk.click();}
   if(a==='import'){$('import-file').click();}
+  if(a==='lastGroup'){st.view='lastGroup';render();}
+  if(a==='backToList'){st.view='list';render();}
   if(a==='groupLiqStart'){st.view='groupSelect';st.groupSel={};st.groupPeriodo='';render();}
   if(a==='toggleGroupEmp'){st.groupSel[id]=!st.groupSel[id];render();}
   if(a==='cancelGroup'){st.view='list';st.groupSel={};render();}
@@ -245,4 +257,3 @@ if(authClient){
 </script>
 </body>
 </html>
-
