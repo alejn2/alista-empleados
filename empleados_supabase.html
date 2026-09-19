@@ -147,10 +147,54 @@ function list(){
 }
 function addEmpForm(){return '<div class="card" style="margin-bottom:12px"><div class="lbl">Nombre *</div><input data-focus id="newName" type="text" placeholder="Nombre completo" style="margin-bottom:8px"><div class="lbl">Cargo / Rol</div><input id="newRole" type="text" placeholder="Ej: Cajero, Repositor..." style="margin-bottom:10px"><button class="bp" data-a="addEmp" style="width:100%">Agregar empleado</button></div>';}
 function empCard(e){const d=debt(e.id);return '<div class="card emp-card" data-a="select" data-id="'+e.id+'">'+avatar(e.name)+'<div style="flex:1"><div style="font-weight:500">'+esc(e.name)+'</div>'+(e.role?'<div style="font-size:12px;color:var(--text2)">'+esc(e.role)+'</div>':'')+'</div><div style="text-align:right"><div style="font-weight:500;color:'+(d>0?'var(--red)':'var(--green)')+'">'+( d>0?money(d):'Al dia')+'</div></div><span style="color:var(--text3);font-size:18px">&#x203A;</span></div>';}
+
+const attendanceState={week:attendanceMonday(),employeeId:null,data:null,loading:false,error:'',request:0};
+function attendanceMonday(value){
+  const today=value||new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Cordoba',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const d=new Date(today+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7)); return d.toISOString().slice(0,10);
+}
+function attendanceDate(key){return key.slice(8,10)+'/'+key.slice(5,7)+'/'+key.slice(0,4);}
+function attendanceShift(days){
+  const d=new Date(attendanceState.week+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);attendanceState.week=d.toISOString().slice(0,10);
+  loadAttendance();
+}
+async function loadAttendance(){
+  const e=emp();if(!e)return;
+  const request=++attendanceState.request, id=e.id, week=attendanceState.week;
+  attendanceState.employeeId=id;attendanceState.data=null;attendanceState.loading=true;attendanceState.error='';render();
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),45000);
+  try{
+    const {data,error}=await authClient.auth.getSession();
+    if(error||!data.session)throw new Error('Tu sesión terminó. Volvé a ingresar.');
+    const res=await fetch(SB_URL+'/functions/v1/attendance-weekly',{method:'POST',signal:controller.signal,headers:{apikey:SB_KEY,Authorization:'Bearer '+data.session.access_token,'Content-Type':'application/json'},body:JSON.stringify({employeeId:id,weekStart:week})});
+    const report=await res.json();
+    if(!res.ok||!report.ok)throw new Error(report.error||'No se pudo consultar asistencia.');
+    if(request===attendanceState.request)attendanceState.data=report;
+  }catch(error){if(request===attendanceState.request)attendanceState.error=error.name==='AbortError'?'La consulta demoró demasiado. Volvé a intentar.':error.message;}
+  finally{clearTimeout(timeout);if(request===attendanceState.request){attendanceState.loading=false;if(st.view==='detail'&&st.sel===id)render();}}
+}
+function attendancePanel(){
+  const a=attendanceState,report=a.data;
+  const end=new Date(a.week+'T12:00:00Z');end.setUTCDate(end.getUTCDate()+5);
+  let body='<div class="muted" role="status">Consultando asistencia…</div>';
+  if(!a.loading&&a.error)body='<div class="warn" role="alert">'+esc(a.error)+'</div>';
+  else if(!a.loading&&report&&!report.linked)body='<div class="muted">Sin vincular: este empleado todavía no tiene una correspondencia en el padrón de asistencias.</div>';
+  else if(!a.loading&&report&&report.linked){
+    const s=report.summary;
+    body='<div class="muted" style="margin-bottom:10px">'+esc(report.sourceName)+' · '+esc(report.local)+'</div><div class="g2"><div class="surf"><div class="lbl">Días con fichajes</div><strong>'+s.daysWithRecords+' de 6</strong></div><div class="surf"><div class="lbl">Tardanzas registradas</div><strong>'+s.lateCount+' · '+s.lateMinutes+' min de demora</strong></div></div>'+
+      '<div class="muted" style="margin:10px 0">'+s.reviewCount+' registros para revisar · '+s.missingCount+' movimientos sin fichaje</div>'+
+      '<details><summary style="cursor:pointer;font-weight:500">Ver detalle de lunes a sábado</summary><div style="overflow-x:auto;margin-top:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:6px">Día</th><th>Entrada AM</th><th>Salida AM</th><th>Entrada PM</th><th>Salida PM</th></tr></thead><tbody>'+
+      report.days.map(day=>'<tr><td style="padding:8px 4px;border-top:1px solid var(--border)">'+esc(day.label)+'<br>'+attendanceDate(day.date).slice(0,5)+'</td>'+day.entries.map(x=>'<td style="padding:8px 4px;border-top:1px solid var(--border);text-align:center"><strong>'+esc(x.time||'—')+'</strong><div style="font-size:11px;color:'+((x.review||x.state==='Demorado'||x.state==='Sin fichaje')?'var(--red)':'var(--text2)')+'">'+esc(x.state)+(x.lateMinutes?' · '+x.lateMinutes+' min':'')+'</div>'+(x.review?'<div style="font-size:11px">Revisar</div>':'')+(x.note?'<details><summary>Nota</summary><div style="min-width:100px">'+esc(x.note)+'</div></details>':'')+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></details>'+
+      '<p class="muted" style="font-size:11px;margin-top:10px">Sin fichaje no significa ausencia confirmada. Semana actual: reporte parcial. Demoras según el estado del sistema (tolerancia de 5 minutos).</p>'+
+      '<div class="muted" style="font-size:11px;margin-top:6px">Consultado: '+new Date(report.updatedAt).toLocaleString('es-AR',{timeZone:'America/Argentina/Cordoba'})+'</div>';
+  }
+  return '<section class="card" aria-label="Asistencia semanal"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px"><strong>Asistencia semanal</strong><button class="sm" data-a="attendanceRefresh" '+(a.loading?'disabled':'')+'>Actualizar</button></div><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px"><button class="sm" data-a="attendancePrev" aria-label="Semana anterior">←</button><span style="font-size:12px">'+attendanceDate(a.week)+' al '+attendanceDate(end.toISOString().slice(0,10))+'</span><button class="sm" data-a="attendanceNext" aria-label="Semana siguiente" '+(a.week>=attendanceMonday()?'disabled':'')+'>→</button><button class="sm" data-a="attendanceToday">Actual</button></div>'+body+'</section>';
+}
+
 function detail(){
   const e=emp();if(!e){st.view='list';return list();}
   const d=debt(e.id),liq=st.liq.filter(function(l){return l.employeeId===e.id;}).sort(function(a,b){return b.date-a.date;});
-  return msg()+(st.modal?slipModal(e,st.liq.find(function(l){return l.id===st.modal;})):'')+'<div style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;align-items:center;gap:10px"><button data-a="back" style="font-size:20px;padding:3px 10px;line-height:1">&#x2190;</button>'+avatar(e.name)+'<div style="flex:1"><div style="font-weight:500;font-size:17px">'+esc(e.name)+'</div>'+(e.role?'<div style="font-size:12px;color:var(--text2)">'+esc(e.role)+'</div>':'')+'</div></div><div class="g2"><div class="surf" style="text-align:center"><div class="lbl">Deuda actual</div><div style="font-size:22px;font-weight:500;color:'+(d>0?'var(--red)':'var(--green)')+'">'+( d>0?money(d):'Sin deuda')+'</div></div><div class="surf" style="text-align:center"><div class="lbl">Liquidaciones</div><div style="font-size:22px;font-weight:500">'+liq.length+'</div></div></div>'+(st.confirmDel?'<div class="card" style="border-color:var(--red)"><div style="font-weight:500;margin-bottom:8px;color:var(--red)">Eliminar a '+esc(e.name)+'?</div><div style="display:flex;gap:8px"><button class="bd" data-a="delConfirm">Si, eliminar</button><button data-a="delCancel">Cancelar</button></div></div>':'<button class="bd sm" data-a="delStart" style="align-self:flex-start">Eliminar empleado</button>')+'<div class="tabs"><button class="tab'+(st.tab==='mov'?' on':'')+'" data-a="tab" data-id="mov">Movimientos</button><button class="tab'+(st.tab==='liq'?' on':'')+'" data-a="tab" data-id="liq">Liquidaciones</button></div>'+(st.tab==='mov'?movements(e):liquidaciones(e,liq,Math.max(0,d)))+'</div>';
+  return msg()+(st.modal?slipModal(e,st.liq.find(function(l){return l.id===st.modal;})):'')+'<div style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;align-items:center;gap:10px"><button data-a="back" style="font-size:20px;padding:3px 10px;line-height:1">&#x2190;</button>'+avatar(e.name)+'<div style="flex:1"><div style="font-weight:500;font-size:17px">'+esc(e.name)+'</div>'+(e.role?'<div style="font-size:12px;color:var(--text2)">'+esc(e.role)+'</div>':'')+'</div></div><div class="g2"><div class="surf" style="text-align:center"><div class="lbl">Deuda actual</div><div style="font-size:22px;font-weight:500;color:'+(d>0?'var(--red)':'var(--green)')+'">'+( d>0?money(d):'Sin deuda')+'</div></div><div class="surf" style="text-align:center"><div class="lbl">Liquidaciones</div><div style="font-size:22px;font-weight:500">'+liq.length+'</div></div></div>'+attendancePanel()+(st.confirmDel?'<div class="card" style="border-color:var(--red)"><div style="font-weight:500;margin-bottom:8px;color:var(--red)">Eliminar a '+esc(e.name)+'?</div><div style="display:flex;gap:8px"><button class="bd" data-a="delConfirm">Si, eliminar</button><button data-a="delCancel">Cancelar</button></div></div>':'<button class="bd sm" data-a="delStart" style="align-self:flex-start">Eliminar empleado</button>')+'<div class="tabs"><button class="tab'+(st.tab==='mov'?' on':'')+'" data-a="tab" data-id="mov">Movimientos</button><button class="tab'+(st.tab==='liq'?' on':'')+'" data-a="tab" data-id="liq">Liquidaciones</button></div>'+(st.tab==='mov'?movements(e):liquidaciones(e,liq,Math.max(0,d)))+'</div>';
 }
 function movements(e){
   const empTx=st.tx.filter(function(t){return t.employeeId===e.id;}).sort(function(a,b){return b.date-a.date;});
@@ -203,10 +247,14 @@ document.addEventListener('click',function(ev){
   const el=ev.target.closest('[data-a]');if(!el)return;
   const a=el.dataset.a,id=el.dataset.id,e=emp();
   if(a==='logout'){authClient.auth.signOut({scope:'local'}).then(function(){location.reload();});return;}
+  if(a==='attendanceRefresh'){loadAttendance();return;}
+  if(a==='attendancePrev'){attendanceShift(-7);return;}
+  if(a==='attendanceNext'){if(attendanceState.week<attendanceMonday())attendanceShift(7);return;}
+  if(a==='attendanceToday'){attendanceState.week=attendanceMonday();loadAttendance();return;}
   if(a==='clearWarn'){st.warn='';render();}
   if(a==='resetView'){st.view='list';st.modal=null;render();}
   if(a==='back'){st.view='list';st.sel=null;st.showLiq=false;st.editTx=null;st.confirmDel=false;render();}
-  if(a==='select'){st.sel=id;st.view='detail';st.tab='mov';st.showLiq=false;st.editTx=null;st.confirmDel=false;render();}
+  if(a==='select'){st.sel=id;st.view='detail';st.tab='mov';st.showLiq=false;st.editTx=null;st.confirmDel=false;loadAttendance();}
   if(a==='tab'){st.tab=id;render();}
   if(a==='toggleAdd'){st.showAdd=!st.showAdd;render();}
   if(a==='addEmp'){const nm=($('newName')||{value:''}).value.trim();if(!nm)return flash('Falta el nombre.');const ne={id:uid(),name:nm,role:($('newRole')||{value:''}).value.trim(),createdAt:Date.now()};st.emp.push(ne);st.showAdd=false;saveToSB();flash('Empleado agregado.');}
