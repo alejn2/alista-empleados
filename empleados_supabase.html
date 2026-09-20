@@ -18,7 +18,7 @@
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo">ALISTA AHORRO</div>
-    <div class="login-sub">Control de empleados</div>
+    <div class="login-sub">Control de empleados · <a href="./index.html" style="color:var(--navy)">Volver a módulos</a></div>
     <div id="login-err" class="login-err">Contraseña incorrecta</div>
     <label class="lbl" for="email-input">Correo electrónico</label>
     <input id="email-input" type="email" autocomplete="username" placeholder="Tu correo" style="margin-bottom:12px">
@@ -135,7 +135,7 @@ function badge(type){return '<span class="badge" style="background:'+(TX_COLOR[t
 function msg(){return st.msg?'<div class="ok" style="margin-bottom:12px">'+esc(st.msg)+'</div>':st.warn?'<div class="warn" style="margin-bottom:12px" data-a="clearWarn">'+esc(st.warn)+'</div>':'';}
 function flash(m){st.msg=m;render();setTimeout(function(){st.msg='';render();},2500);}
 function render(){
-  try{root.innerHTML=st.view==='detail'?detail():st.view==='groupSelect'?groupSelectView():st.view==='groupLiq'?groupLiqForm():st.view==='lastGroup'?lastGroupView():list();if(st.view==='list')root.insertAdjacentHTML('afterbegin','<button data-a="lastGroup" style="width:100%;margin-bottom:12px">Ver última liquidación grupal</button>');setFocus();}
+  try{root.innerHTML=st.view==='detail'?detail():st.view==='groupSelect'?groupSelectView():st.view==='groupLiq'?groupLiqForm():st.view==='lastGroup'?lastGroupView():list();if(st.view==='list')root.insertAdjacentHTML('afterbegin','<button data-a="lastGroup" style="width:100%;margin-bottom:12px">Ver última liquidación grupal</button>');root.insertAdjacentHTML('afterbegin','<nav aria-label="Navegación del ecosistema" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;font-size:13px"><a href="./index.html" style="color:var(--navy);text-decoration:none;font-weight:600">← Ecosistema ALISTA</a><span style="color:var(--text2)">/ Empleados</span></nav>');setFocus();}
   catch(e){root.innerHTML='<div class="card"><h3 style="color:var(--red);margin-bottom:8px">Error</h3><div class="muted">'+esc(e.message)+'</div><button data-a="resetView" style="margin-top:12px">Volver</button></div>';}
 }
 function setFocus(){const f=document.querySelector('[data-focus]');if(f)f.focus();}
